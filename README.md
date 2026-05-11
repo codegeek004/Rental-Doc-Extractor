@@ -1,4 +1,4 @@
-# Rental Agreement Metadata Extractor
+# Rental Document Extractor
 
 A FastAPI service that extracts structured metadata from rental agreements (DOCX and scanned PNG) using a fine-tuned RoBERTa question-answering model.
 
