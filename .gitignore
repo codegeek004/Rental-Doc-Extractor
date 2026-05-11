@@ -1,0 +1,4 @@
+*.safetensors
+*.safetensors
+fine_tuned_contract_qa/
+venv/
