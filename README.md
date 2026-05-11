@@ -4,12 +4,12 @@ A FastAPI service that extracts structured metadata from rental agreements (DOCX
 
 ## Features
 
-- **Question-answering extraction** - Each field is a question against the document; no regex, no rule-based parsing
-- **CUAD-pretrained backbone** - Starts from a model already trained on legal-contract QA, then fine-tuned on rental agreements
-- **Sliding-window training and inference** - Long documents are handled without truncating the answer span
-- **DOCX + scanned PNG support** - python-docx for native Word docs, Tesseract OCR for scanned images
-- **Post-processing with parsers, not regex** - dateparser for dates, word2number for written numbers
-- **Modular** - Training, extraction, and serving are fully decoupled
+- **Question-answering extraction**: Each field is a question against the document, no regex, no rule-based parsing
+- **CUAD-pretrained backbone**: Starts from a model already trained on legal-contract QA, then fine-tuned on rental agreements
+- **Sliding-window training and inference**: Long documents are handled without truncating the answer span
+- **DOCX + scanned PNG support**: python-docx for native Word docs, Tesseract OCR for scanned images
+- **Post-processing with parsers, not regex**: dateparser for dates, word2number for written numbers
+- **Modular**: Training, extraction, and serving are fully decoupled
 
 ## Tech Stack
 
@@ -19,6 +19,35 @@ A FastAPI service that extracts structured metadata from rental agreements (DOCX
 - **DOCX parsing**: python-docx
 - **OCR**: pytesseract + Pillow
 - **Post-processing**: dateparser, word2number
+
+## Deployment
+
+This service is deployed on Google Cloud Platform and is publicly accessible for testing:
+
+```
+http://34.44.150.96/extract
+```
+
+Test it directly with curl:
+
+```bash
+curl -X POST "http://34.44.150.96/extract" \
+  -F "file=@your-agreement.docx"
+```
+
+Or from Python:
+
+```python
+import requests
+
+with open("agreement.docx", "rb") as f:
+    r = requests.post(
+        "http://34.44.150.96/extract",
+        files={"file": f}
+    )
+
+print(r.json())
+```
 
 ## Per-Field Recall
 
@@ -36,10 +65,10 @@ Recall on the 10-document training set, comparing normalized predictions against
 
 ### Why the scores are what they are
 
-- **Tiny training set.** Nine documents yield ~18 usable training spans after label alignment. There's not enough signal for the model to robustly learn rental-agreement layout patterns; it's leaning heavily on what CUAD pretraining already taught it.
+- **Tiny training set.** Nine documents yield about 18 usable training spans after label alignment. There's not enough signal for the model to robustly learn rental-agreement layout patterns, it's leaning heavily on what CUAD pretraining already taught it.
 - **OCR on PNG files is lossy.** Four of the ten documents are scanned images. Tesseract garbles rent values and dates on some of them ("9,500" becomes "9.99.7.9°"), so the ground truth doesn't appear in the extracted text and the model has nothing to match.
 - **Renewal Notice is the worst field.** It's often written in words ("ninety days") and sometimes absent. The normalizer's `word2number` fallback handles "ninety" only if the QA model returns that exact span, which it rarely does.
-- **End-date matching is hurt by data issues.** One row in `train.csv` has `31.02.2011`, which isn't a real date — `dateparser` rejects it under strict parsing, so the document is unmatchable.
+- **End-date matching is hurt by data issues.** One row in `train.csv` has `31.02.2011`, which isn't a real date, so `dateparser` rejects it under strict parsing and the document is unmatchable.
 
 ## Getting Started
 
@@ -52,7 +81,7 @@ Recall on the 10-document training set, comparing normalized predictions against
 
 ##### Clone the repository
 ```bash
-git clone <your-repo-url>
+git clone git@github.com:codegeek004/Rental-Doc-Extractor.git
 cd Rental-Document-Extractor
 ```
 
@@ -68,7 +97,7 @@ pip install -r requirements.txt
 ```
 
 ##### Train the model
-The fine-tuned weights aren't committed (~500 MB). Run training once before serving:
+The fine-tuned weights aren't committed (around 500 MB). Run training once before serving:
 ```bash
 python train.py
 ```
@@ -110,13 +139,13 @@ project/
 4. For PNG, `pytesseract` runs OCR on the image
 5. The text is passed to the QA model along with six pre-written questions, one per field
 6. For each question, the Hugging Face QA pipeline runs a sliding window over the full text (`max_seq_len=384`, `doc_stride=128`) and returns the highest-scoring span across all windows
-7. Raw answers are post-processed: dates via `dateparser`, numeric amounts by isolating the longest digit run after dropping thousand-separator commas, days using `word2number`, party names by stripping leading boilerplate (`between`, `lessor`, etc.)
+7. Raw answers are post-processed: dates via `dateparser`, numeric amounts by isolating the longest digit run after dropping thousand-separator commas, days using `word2number`, party names by stripping leading boilerplate (`between`, `lessor`, and so on)
 8. The cleaned record is returned as JSON
 
 ### How it works (training path)
 
 1. For each `(document, field)` pair in `train.csv`, locate the ground-truth value's character span inside the extracted text:
-   - **Dates**: parse with `dateparser` using `STRICT_PARSING=True`, match windows of 1-6 words
+   - **Dates**: parse with `dateparser` using `STRICT_PARSING=True`, match windows of 1 to 6 words
    - **Numbers**: strip commas, periods, `Rs`, `Php`, `/-`, then exact-match
    - **Party names**: substring search with a case-insensitive fallback
 2. Convert each `(question, context, char_span)` triple into one or more SQuAD-style features using a 128-token sliding window. Windows that don't contain the answer get `(start=0, end=0)` = CLS = "no answer".
@@ -126,7 +155,7 @@ project/
 
 ### Field routing
 
-Each of the six fields has a dedicated question. The questions are run independently against the same context — the model has no shared state between fields.
+Each of the six fields has a dedicated question. The questions are run independently against the same context, so the model has no shared state between fields.
 
 ```
 Document text  -->  "What is the monthly rent amount?"             -->  agreement_value
@@ -139,20 +168,20 @@ Document text  -->  "What is the monthly rent amount?"             -->  agreemen
 
 ### Why fine-tune at all?
 
-The base `Rakib/roberta-base-on-cuad` is already trained on CUAD, a legal-contract QA dataset, so it has a reasonable prior for questions like "Who is the lessor?". Fine-tuning on rental agreements teaches it the specific phrasing and layout used in this dataset — Indian-format dates, `Rs.` currency prefixes, parties named with honorific prefixes like "MR.K.Kuttan", and so on.
+The base `Rakib/roberta-base-on-cuad` is already trained on CUAD, a legal-contract QA dataset, so it has a reasonable prior for questions like "Who is the lessor?". Fine-tuning on rental agreements teaches it the specific phrasing and layout used in this dataset: Indian-format dates, `Rs.` currency prefixes, parties named with honorific prefixes like "MR.K.Kuttan", and so on.
 
 ### Why no regex?
 
-The brief explicitly prohibits regex / rule-based approaches for **extraction**. All actual field extraction is done by the QA model. The only string-handling in the codebase is:
+All actual field extraction is done by the QA model. The only string-handling in the codebase is:
 
-- Locating ground-truth spans during *training* (so the model has supervision targets — this isn't extraction)
+- Locating ground-truth spans during *training* (so the model has supervision targets, this isn't extraction)
 - Cleaning the model's output during post-processing (parsing dates with a library, dropping currency symbols)
 
-No hand-written pattern identifies "the rent value" or "the start date" — that's the model's job.
+No hand-written pattern identifies "the rent value" or "the start date", that's the model's job.
 
 ### Why sliding windows?
 
-Most rental agreements tokenize to >512 tokens. Without a sliding window, anything past the truncation point is invisible to both training and inference. A `max_seq_len=384` window with `doc_stride=128` overlap means every span in the document is covered by at least one window, and the pipeline picks the best span across all of them.
+Most rental agreements tokenize to more than 512 tokens. Without a sliding window, anything past the truncation point is invisible to both training and inference. A `max_seq_len=384` window with `doc_stride=128` overlap means every span in the document is covered by at least one window, and the pipeline picks the best span across all of them.
 
 ## API
 
@@ -176,7 +205,7 @@ Most rental agreements tokenize to >512 tokens. Without a sliding window, anythi
 }
 ```
 
-Date fields are returned as `DD.MM.YYYY`. Numeric fields are returned as plain digit strings. Party names are returned with leading boilerplate (e.g., "lessor", "between") stripped.
+Date fields are returned as `DD.MM.YYYY`. Numeric fields are returned as plain digit strings. Party names are returned with leading boilerplate (such as "lessor", "between") stripped.
 
 ## Usage
 
@@ -214,8 +243,8 @@ The script ends by printing the per-field recall table shown at the top of this 
 
 ## Acknowledgements
 
-- [Rakib/roberta-base-on-cuad](https://huggingface.co/Rakib/roberta-base-on-cuad) - The CUAD-fine-tuned QA model used as the base
-- [CUAD](https://www.atticusprojectai.org/cuad) - Contract Understanding Atticus Dataset
+- [Rakib/roberta-base-on-cuad](https://huggingface.co/Rakib/roberta-base-on-cuad): The CUAD-fine-tuned QA model used as the base
+- [CUAD](https://www.atticusprojectai.org/cuad): Contract Understanding Atticus Dataset
 - [Hugging Face Transformers](https://github.com/huggingface/transformers)
 - [python-docx](https://github.com/python-openxml/python-docx)
 - [Tesseract](https://github.com/tesseract-ocr/tesseract)
